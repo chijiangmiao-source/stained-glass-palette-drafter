@@ -1,0 +1,12 @@
+# 一次性验收服务：Vitest 单元测试 + Playwright 端到端测试
+# 基础镜像自带与 @playwright/test 1.47.2 匹配的浏览器
+FROM mcr.microsoft.com/playwright:v1.47.2-jammy
+WORKDIR /app
+# 浏览器已随镜像提供，安装依赖时跳过重复下载
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+ENV CI=1
+# E2E_BASE_URL 由 docker-compose 注入，指向 web 服务
+CMD ["npm", "run", "verify"]
