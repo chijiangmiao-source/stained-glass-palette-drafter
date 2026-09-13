@@ -5,11 +5,13 @@ import { parsePalette } from './core/palette';
 import { quantizePixels } from './core/quantize';
 import { applyOverrides } from './core/mapping';
 import { buildExportText } from './core/export';
+import { buildPackingPlan, markBoxPacked, type PackingPlan } from './core/packing';
 import type { GridResult, PaletteColor } from './core/types';
 import GridView from './components/GridView.vue';
 import StatsTable from './components/StatsTable.vue';
 import QualityCheck from './components/QualityCheck.vue';
 import InventoryCheck from './components/InventoryCheck.vue';
+import PackingPlanPanel from './components/PackingPlan.vue';
 
 const paletteInput = ref('');
 const palette = ref<PaletteColor[] | null>(null);
@@ -36,6 +38,33 @@ const exportText = computed(() => (result.value ? buildExportText(result.value) 
 
 /** 当前最终色片数（含人工校色），作为备料核验的需求来源；无映射结果时为 null */
 const finalCounts = computed(() => result.value?.counts ?? null);
+
+/** 当前装箱批次单状态（含逐箱已装标记）；人工校色、换图或（重新）应用色板时清除 */
+const packingPlan = ref<PackingPlan | null>(null);
+
+/** 当前版图的非透明格总数：创建批次单的依据；无映射结果时为 null */
+const packableCount = computed(() => {
+  const r = result.value;
+  if (!r) return null;
+  return r.counts.reduce((sum, n) => sum + n, 0);
+});
+
+/** 清除装箱批次单：人工校色、换图或（重新）应用色板后，旧计划与当前版图不符 */
+function clearPackingPlan() {
+  packingPlan.value = null;
+}
+
+/** PackingPlan 组件事件：以当前最终映射与色板创建批次单（全透明时核心层返回 null） */
+function onPackingCreate(capacity: number) {
+  if (!result.value || !palette.value) return;
+  packingPlan.value = buildPackingPlan(result.value, palette.value, capacity);
+}
+
+/** PackingPlan 组件事件：把指定箱号标记为已装 */
+function onPackingPack(boxNumber: number) {
+  if (!packingPlan.value) return;
+  packingPlan.value = markBoxPacked(packingPlan.value, boxNumber);
+}
 
 /** 结束质量核查：上传图片、重应用色板或其报错时调用，网格描边随之清除 */
 function endQualityCheck() {
@@ -73,6 +102,8 @@ async function onFileChange(e: Event) {
 
   // 上传图片（无论随后成功或失败）都结束质量核查，网格描边恢复原显示
   endQualityCheck();
+  // 换图后旧批次单与新版图不符，一并清除
+  clearPackingPlan();
   error.value = '';
   const decoded = await decodePngFile(file);
   if (!decoded.ok) {
@@ -100,6 +131,8 @@ async function onFileChange(e: Event) {
 function applyPalette() {
   // （重新）应用色板及其报错都会结束质量核查
   endQualityCheck();
+  // （重新）应用色板后旧批次单与新版图不符，一并清除
+  clearPackingPlan();
   error.value = '';
   const parsed = parsePalette(paletteInput.value);
   if (!parsed.ok) {
@@ -132,6 +165,8 @@ function onOverride({ row, col, paletteIndex }: { row: number; col: number; pale
     next.set(idx, paletteIndex);
   }
   overrides.value = next;
+  // 人工校色改变最终映射，旧批次单随之失效
+  clearPackingPlan();
 }
 
 function download() {
@@ -222,5 +257,14 @@ function download() {
     <!-- 独立的备料核验面板：App 只传入当前色板与最终计数，核验单状态由组件自管；
          始终挂载，使旧核验单在换图或重应用色板后仍保留为已过期快照 -->
     <InventoryCheck :palette="palette" :counts="finalCounts" />
+
+    <!-- 装箱批次面板：App 只传递创建所需数据并保存批次状态，创建与逐箱装箱
+         由组件通过事件提交；人工校色、换图或重应用色板时批次单被清除 -->
+    <PackingPlanPanel
+      :plan="packingPlan"
+      :piece-count="packableCount"
+      @create="onPackingCreate"
+      @pack="onPackingPack"
+    />
   </main>
 </template>
