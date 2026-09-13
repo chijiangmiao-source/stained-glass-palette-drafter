@@ -165,7 +165,27 @@ function draw() {
     ctx.stroke();
   }
 
-  // 质量核查超限格描边：在底色与网格线之上醒目标记，小格时略收描边宽度
+  // 行列编号（从 1 开始）
+  ctx.fillStyle = '#333333';
+  ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const step = labelStep.value;
+  for (let c = 1; c <= width; c++) {
+    if ((c - 1) % step !== 0 && c !== width) continue;
+    ctx.fillText(String(c), GRID_LABEL_W + (c - 0.5) * s, GRID_LABEL_H / 2);
+  }
+  for (let r = 1; r <= height; r++) {
+    if ((r - 1) % step !== 0 && r !== height) continue;
+    ctx.fillText(String(r), GRID_LABEL_W / 2, GRID_LABEL_H + (r - 0.5) * s);
+  }
+
+  // 外框（先于超限描边绘制：边缘超限格的红框须完整压在外框之上）
+  ctx.strokeStyle = '#555555';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(GRID_LABEL_W + 0.5, GRID_LABEL_H + 0.5, width * s, height * s);
+
+  // 质量核查超限格描边：在底色、网格线与外框之上醒目标记，小格时略收描边宽度
   if (props.highlighted && props.highlighted.size > 0) {
     ctx.strokeStyle = QUALITY_STROKE;
     ctx.lineWidth = s >= 8 ? 2 : 1;
@@ -182,42 +202,43 @@ function draw() {
     ctx.stroke();
   }
 
-  // 行列编号（从 1 开始）
-  ctx.fillStyle = '#333333';
-  ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const step = labelStep.value;
-  for (let c = 1; c <= width; c++) {
-    if ((c - 1) % step !== 0 && c !== width) continue;
-    ctx.fillText(String(c), GRID_LABEL_W + (c - 0.5) * s, GRID_LABEL_H / 2);
-  }
-  for (let r = 1; r <= height; r++) {
-    if ((r - 1) % step !== 0 && r !== height) continue;
-    ctx.fillText(String(r), GRID_LABEL_W / 2, GRID_LABEL_H + (r - 0.5) * s);
-  }
+  // 交互状态框（悬停黑框 / 选中蓝框）：该格同时为超限格时，状态框内收到红框
+  // 内侧并与红框邻接，两条框各占独立像素带、互不覆盖，选中/悬停与超限状态同时可辨
+  const isOverCell = (row: number, col: number) =>
+    !!props.highlighted && props.highlighted.has((row - 1) * width + (col - 1));
 
-  // 外框
-  ctx.strokeStyle = '#555555';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(GRID_LABEL_W + 0.5, GRID_LABEL_H + 0.5, width * s, height * s);
+  const drawStateFrame = (loc: { row: number; col: number }, color: string) => {
+    const x = GRID_LABEL_W + (loc.col - 1) * s;
+    const y = GRID_LABEL_H + (loc.row - 1) * s;
+    if (!isOverCell(loc.row, loc.col)) {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, s - 2, s - 2);
+      return;
+    }
+    const redW = s >= 8 ? 2 : 1; // 与超限描边宽度保持一致
+    // 首选 2px 状态框，中线距红框内缘 1px（两框恰好邻接）
+    let lineWidth = 2;
+    let pad = redW + 1;
+    if (s - 2 * pad < 1) {
+      // 小格放不下 2px 内框：改用 1px 状态框，中线距红框内缘 0.5px
+      lineWidth = 1;
+      pad = redW + 0.5;
+    }
+    if (s - 2 * pad < 1) return; // 2–3px 极小格几何上无法并置双框：保留红框，状态由提示/弹层表达
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(x + pad, y + pad, s - pad * 2, s - pad * 2);
+  };
 
   // 悬停高亮
   if (hover.value) {
-    const x = GRID_LABEL_W + (hover.value.col - 1) * s;
-    const y = GRID_LABEL_H + (hover.value.row - 1) * s;
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, s - 2, s - 2);
+    drawStateFrame(hover.value, '#000000');
   }
 
   // 校色弹层锚点格高亮
   if (selected.value) {
-    const x = GRID_LABEL_W + (selected.value.col - 1) * s;
-    const y = GRID_LABEL_H + (selected.value.row - 1) * s;
-    ctx.strokeStyle = '#2f6feb';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x + 1, y + 1, s - 2, s - 2);
+    drawStateFrame(selected.value, '#2f6feb');
   }
 }
 
