@@ -22,8 +22,10 @@ export interface CellInfo {
   blank: boolean;
   /** 原图颜色；空格为 null */
   src: Rgb | null;
-  /** 命中的色板下标（0 起始）；空格为 -1 */
+  /** 自动命中的色板下标（0 起始）；空格为 -1 */
   paletteIndex: number;
+  /** 人工指定的色板下标（0 起始）；未校色或空格时为 -1 */
+  manualIndex: number;
 }
 
 /** 整幅图的映射结果：网格、统计与导出共用同一份数据 */
@@ -32,6 +34,6 @@ export interface GridResult {
   height: number;
   /** 行优先排列，长度 = width * height */
   cells: CellInfo[];
-  /** 每个色板颜色命中的片数，长度 = 色板颜色数 */
+  /** 每个色板颜色命中的片数（含人工校色），长度 = 色板颜色数 */
   counts: number[];
 }

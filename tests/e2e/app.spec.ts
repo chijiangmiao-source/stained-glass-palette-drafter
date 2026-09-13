@@ -243,6 +243,159 @@ test.describe('彩窗色号映射工具', () => {
     expect(content).toBe('');
   });
 
+  test('逐格人工校色：改色后计数、网格与导出同步，恢复后回到自动结果', async ({ page }) => {
+    // 2×2：红、绿 / 蓝、透明
+    const png = makePng(2, 2, [
+      px('FF0000'), px('00FF00'),
+      px('0000FF'), TRANSPARENT,
+    ]);
+    await page.goto('/');
+    await upload(page, png);
+    await applyPalette(page, PALETTE_RGB);
+
+    const initial = ['1\t1\t1', '1\t2\t2', '2\t1\t3'].join('\n');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue(initial);
+    await expect(statsCount(page, 1)).toHaveText('1');
+    await expect(statsCount(page, 2)).toHaveText('1');
+    await expect(statsCount(page, 3)).toHaveText('1');
+    expect(await readCellPoint(page, 1, 2)).toEqual([0, 255, 0, 255]);
+
+    // 点击第 1 行第 2 列（自动为绿），弹出选色面板
+    const p = await cellCenter(page, 1, 2);
+    await page.mouse.click(p.x, p.y);
+    const picker = page.locator('[data-testid="color-picker"]');
+    await expect(picker).toBeVisible();
+    await expect(picker).toContainText('第 1 行第 2 列');
+    // 当前色（绿=色板 2）有选中标记，且尚无“恢复自动”按钮
+    await expect(page.locator('[data-testid="restore-auto"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="color-option-2"] .check')).toBeVisible();
+
+    // 改选色板 3（蓝）
+    await page.click('[data-testid="color-option-3"]');
+    await expect(picker).toHaveCount(0);
+
+    // 格子立即变蓝，标记人工指定，计数与导出同步
+    expect(await readCellPoint(page, 1, 2)).toEqual([0, 0, 255, 255]);
+    await expect(statsCount(page, 1)).toHaveText('1');
+    await expect(statsCount(page, 2)).toHaveText('0');
+    await expect(statsCount(page, 3)).toHaveText('2');
+    const corrected = ['1\t1\t1', '1\t2\t3', '2\t1\t3'].join('\n');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue(corrected);
+
+    // 悬停显示自动命中与“人工指定”
+    await page.mouse.move(p.x, p.y);
+    const tip = page.locator(TOOLTIP);
+    await expect(tip).toContainText('自动命中：#00FF00（色板 2）');
+    await expect(tip).toContainText('目标：#0000FF（色板 3，人工指定）');
+
+    // 再次打开该格，恢复自动计算
+    await page.mouse.click(p.x, p.y);
+    await expect(page.locator('[data-testid="restore-auto"]')).toBeVisible();
+    await page.click('[data-testid="restore-auto"]');
+    await expect(picker).toHaveCount(0);
+    await expect(statsCount(page, 2)).toHaveText('1');
+    await expect(statsCount(page, 3)).toHaveText('1');
+    expect(await readCellPoint(page, 1, 2)).toEqual([0, 255, 0, 255]);
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue(initial);
+
+    // 未保留任何人工修改时，下载内容与自动版本一致
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.click(DOWNLOAD_BUTTON),
+    ]);
+    const content = await readFile(await download.path(), 'utf-8');
+    expect(content).toBe(initial);
+  });
+
+  test('透明格不可校色：点击仅提示且结果不变', async ({ page }) => {
+    const png = makePng(2, 2, [
+      px('FF0000'), px('00FF00'),
+      px('0000FF'), TRANSPARENT,
+    ]);
+    await page.goto('/');
+    await upload(page, png);
+    await applyPalette(page, PALETTE_RGB);
+
+    const blank = await cellCenter(page, 2, 2);
+    await page.mouse.click(blank.x, blank.y);
+
+    const picker = page.locator('[data-testid="color-picker"]');
+    await expect(picker).toBeVisible();
+    await expect(page.locator('[data-testid="blank-reject"]')).toHaveText(
+      '该格为透明空格，不能进行人工校色。',
+    );
+    // 不提供任何可选色，结果完全不变
+    await expect(page.locator('[data-testid="color-option-1"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="restore-auto"]')).toHaveCount(0);
+    await expect(statsCount(page, 1)).toHaveText('1');
+    await expect(statsCount(page, 2)).toHaveText('1');
+    await expect(statsCount(page, 3)).toHaveText('1');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue(
+      ['1\t1\t1', '1\t2\t2', '2\t1\t3'].join('\n'),
+    );
+
+    // 关闭提示后再点非透明格仍可正常校色
+    await page.click('[data-testid="blank-reject-close"]');
+    await expect(picker).toHaveCount(0);
+    const red = await cellCenter(page, 1, 1);
+    await page.mouse.click(red.x, red.y);
+    await expect(page.locator('[data-testid="color-option-3"]')).toBeVisible();
+  });
+
+  test('上传新图片后旧的人工指定不带入新结果', async ({ page }) => {
+    await page.goto('/');
+    await upload(
+      page,
+      makePng(2, 2, [px('FF0000'), px('00FF00'), px('0000FF'), TRANSPARENT]),
+    );
+    await applyPalette(page, PALETTE_RGB);
+
+    // 先把绿格人工改为蓝
+    const p = await cellCenter(page, 1, 2);
+    await page.mouse.click(p.x, p.y);
+    await page.click('[data-testid="color-option-3"]');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue(
+      ['1\t1\t1', '1\t2\t3', '2\t1\t3'].join('\n'),
+    );
+
+    // 上传新图片（1×1 纯绿），旧指定被清空
+    await upload(page, makePng(1, 1, [px('00FF00')]), 'other.png');
+    await expect(page.locator('[data-testid="image-info"]')).toContainText('other.png');
+    await expect(statsCount(page, 1)).toHaveText('0');
+    await expect(statsCount(page, 2)).toHaveText('1');
+    await expect(statsCount(page, 3)).toHaveText('0');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue('1\t1\t2');
+    expect(await readCellPoint(page, 1, 1)).toEqual([0, 255, 0, 255]);
+
+    // 打开唯一格子：没有“恢复自动”按钮，说明它是自动命中而非人工指定
+    const q = await cellCenter(page, 1, 1);
+    await page.mouse.click(q.x, q.y);
+    await expect(page.locator('[data-testid="restore-auto"]')).toHaveCount(0);
+  });
+
+  test('重新应用色板清空人工指定并以新色板重新自动配色', async ({ page }) => {
+    await page.goto('/');
+    await upload(
+      page,
+      makePng(2, 1, [px('FF0000'), px('00FF00')]),
+    );
+    await applyPalette(page, 'FF0000\n00FF00\n0000FF');
+
+    // 红格人工改蓝
+    const p = await cellCenter(page, 1, 1);
+    await page.mouse.click(p.x, p.y);
+    await page.click('[data-testid="color-option-3"]');
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue('1\t1\t3\n1\t2\t2');
+
+    // 重新应用同一色板：人工指定被清空
+    await page.click(APPLY_BUTTON);
+    await expect(page.locator(EXPORT_PREVIEW)).toHaveValue('1\t1\t1\n1\t2\t2');
+    await expect(statsCount(page, 1)).toHaveText('1');
+    await expect(statsCount(page, 2)).toHaveText('1');
+    await expect(statsCount(page, 3)).toHaveText('0');
+    expect(await readCellPoint(page, 1, 1)).toEqual([255, 0, 0, 255]);
+  });
+
   test('128×128 上限尺寸：统计与导出完整一致', async ({ page }) => {
     // 棋盘图案：(x+y) 偶数为红、奇数为绿，各 8192 片
     const pixels = [];

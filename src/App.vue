@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { decodePngFile, type DecodedImage } from './core/png';
 import { parsePalette } from './core/palette';
 import { quantizePixels } from './core/quantize';
+import { applyOverrides } from './core/mapping';
 import { buildExportText } from './core/export';
 import type { GridResult, PaletteColor } from './core/types';
 import GridView from './components/GridView.vue';
@@ -12,24 +13,37 @@ const paletteInput = ref('');
 const palette = ref<PaletteColor[] | null>(null);
 const image = ref<DecodedImage | null>(null);
 const imageName = ref('');
-const result = ref<GridResult | null>(null);
+/** 自动配色结果（不含人工校色），作为网格、统计与导出的底图 */
+const baseResult = ref<GridResult | null>(null);
+/** 当前图片对应的人工校色集合：单元格行优先下标 → 人工色板下标 */
+const overrides = ref<ReadonlyMap<number, number>>(new Map());
 const error = ref('');
+
+/** 映射层集中合成最终色号与片数，网格、统计、导出共用这唯一来源 */
+const result = computed<GridResult | null>(() =>
+  baseResult.value ? applyOverrides(baseResult.value, overrides.value) : null,
+);
 
 /** 导出内容与网格、统计同源，保证逐格一致 */
 const exportText = computed(() => (result.value ? buildExportText(result.value) : ''));
 
+/** 清空人工指定：上传新图片或（重新）应用色板时调用 */
+function clearOverrides() {
+  overrides.value = new Map();
+}
+
 function recompute() {
   if (!image.value || !palette.value) {
-    result.value = null;
+    baseResult.value = null;
     return;
   }
   const q = quantizePixels(image.value.data, image.value.width, image.value.height, palette.value);
   if (q.ok) {
-    result.value = q.result;
+    baseResult.value = q.result;
   } else {
     // 解码阶段已校验透明度，理论上不会走到这里；防御性处理
     error.value = q.error;
-    result.value = null;
+    baseResult.value = null;
     image.value = null;
   }
 }
@@ -48,11 +62,14 @@ async function onFileChange(e: Event) {
     error.value = decoded.error;
     image.value = null;
     imageName.value = '';
-    result.value = null;
+    baseResult.value = null;
+    clearOverrides();
     return;
   }
   image.value = decoded.image;
   imageName.value = file.name;
+  // 上传新图片：旧的人工指定不带入新结果
+  clearOverrides();
 
   if (!palette.value && paletteInput.value.trim()) {
     // 已填写但未应用的色板，随图片一起校验
@@ -69,11 +86,32 @@ function applyPalette() {
     // 色板非法：清除旧版图并明确报错
     error.value = parsed.error;
     palette.value = null;
-    result.value = null;
+    baseResult.value = null;
+    clearOverrides();
     return;
   }
   palette.value = parsed.colors;
+  // （重新）应用色板：以新色板重新自动配色，并清空人工指定
+  clearOverrides();
   recompute();
+}
+
+/** GridView 发出的校色操作：paletteIndex 为 null 时恢复该格自动结果 */
+function onOverride({ row, col, paletteIndex }: { row: number; col: number; paletteIndex: number | null }) {
+  if (!baseResult.value) return;
+  const idx = (row - 1) * baseResult.value.width + (col - 1);
+  const cell = baseResult.value.cells[idx];
+  if (!cell || cell.blank) return; // 透明格不可校色
+  if (paletteIndex !== null && (paletteIndex < 0 || paletteIndex >= (palette.value?.length ?? 0))) {
+    return;
+  }
+  const next = new Map(overrides.value);
+  if (paletteIndex === null) {
+    next.delete(idx);
+  } else {
+    next.set(idx, paletteIndex);
+  }
+  overrides.value = next;
 }
 
 function download() {
@@ -122,7 +160,8 @@ function download() {
     <template v-if="result && palette">
       <section class="panel">
         <h2>3. 编号网格</h2>
-        <GridView :result="result" :palette="palette" />
+        <p class="hint">点击非透明格可从现有色板中选择替代色并立即标记为人工指定；再次打开该格可恢复自动计算结果。透明格不可校色。</p>
+        <GridView :result="result" :palette="palette" @override="onOverride" />
       </section>
 
       <section class="panel">

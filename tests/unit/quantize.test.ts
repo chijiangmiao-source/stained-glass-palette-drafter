@@ -57,7 +57,14 @@ describe('quantizePixels', () => {
     const r = quantizePixels(rgba([0, 0, 0, 0], [255, 0, 0, 255]), 2, 1, palette);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.result.cells[0]).toEqual({ row: 1, col: 1, blank: true, src: null, paletteIndex: -1 });
+      expect(r.result.cells[0]).toEqual({
+        row: 1,
+        col: 1,
+        blank: true,
+        src: null,
+        paletteIndex: -1,
+        manualIndex: -1,
+      });
       expect(r.result.cells[1].blank).toBe(false);
       expect(r.result.counts).toEqual([1, 0]);
     }

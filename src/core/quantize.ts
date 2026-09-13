@@ -35,7 +35,7 @@ export function quantizePixels(
     const a = data[i * 4 + 3];
 
     if (a === 0) {
-      cells[i] = { row, col, blank: true, src: null, paletteIndex: -1 };
+      cells[i] = { row, col, blank: true, src: null, paletteIndex: -1, manualIndex: -1 };
       continue;
     }
     if (a !== 255) {
@@ -60,7 +60,14 @@ export function quantizePixels(
       }
     }
     counts[best]++;
-    cells[i] = { row, col, blank: false, src: { r, g, b }, paletteIndex: best };
+    cells[i] = {
+      row,
+      col,
+      blank: false,
+      src: { r, g, b },
+      paletteIndex: best,
+      manualIndex: -1,
+    };
   }
 
   return { ok: true, result: { width, height, cells, counts } };
