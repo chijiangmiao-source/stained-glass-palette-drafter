@@ -8,6 +8,7 @@ import { buildExportText } from './core/export';
 import type { GridResult, PaletteColor } from './core/types';
 import GridView from './components/GridView.vue';
 import StatsTable from './components/StatsTable.vue';
+import QualityCheck from './components/QualityCheck.vue';
 import InventoryCheck from './components/InventoryCheck.vue';
 
 const paletteInput = ref('');
@@ -20,6 +21,11 @@ const baseResult = ref<GridResult | null>(null);
 const overrides = ref<ReadonlyMap<number, number>>(new Map());
 const error = ref('');
 
+/** 质量核查是否开启（上传图片、重应用色板或其报错时由 App 结束） */
+const qualityActive = ref(false);
+/** 核查开启时的超限格描边集合（行优先下标）；未开启时为 null，网格保持原显示 */
+const qualityHighlights = ref<ReadonlySet<number> | null>(null);
+
 /** 映射层集中合成最终色号与片数，网格、统计、导出共用这唯一来源 */
 const result = computed<GridResult | null>(() =>
   baseResult.value ? applyOverrides(baseResult.value, overrides.value) : null,
@@ -30,6 +36,12 @@ const exportText = computed(() => (result.value ? buildExportText(result.value) 
 
 /** 当前最终色片数（含人工校色），作为备料核验的需求来源；无映射结果时为 null */
 const finalCounts = computed(() => result.value?.counts ?? null);
+
+/** 结束质量核查：上传图片、重应用色板或其报错时调用，网格描边随之清除 */
+function endQualityCheck() {
+  qualityActive.value = false;
+  qualityHighlights.value = null;
+}
 
 /** 清空人工指定：上传新图片或（重新）应用色板时调用 */
 function clearOverrides() {
@@ -59,6 +71,8 @@ async function onFileChange(e: Event) {
   input.value = '';
   if (!file) return;
 
+  // 上传图片（无论随后成功或失败）都结束质量核查，网格描边恢复原显示
+  endQualityCheck();
   error.value = '';
   const decoded = await decodePngFile(file);
   if (!decoded.ok) {
@@ -84,6 +98,8 @@ async function onFileChange(e: Event) {
 }
 
 function applyPalette() {
+  // （重新）应用色板及其报错都会结束质量核查
+  endQualityCheck();
   error.value = '';
   const parsed = parsePalette(paletteInput.value);
   if (!parsed.ok) {
@@ -165,7 +181,12 @@ function download() {
       <section class="panel">
         <h2>3. 编号网格</h2>
         <p class="hint">点击非透明格可从现有色板中选择替代色并立即标记为人工指定；再次打开该格可恢复自动计算结果。透明格不可校色。</p>
-        <GridView :result="result" :palette="palette" @override="onOverride" />
+        <GridView
+          :result="result"
+          :palette="palette"
+          :highlighted="qualityHighlights"
+          @override="onOverride"
+        />
       </section>
 
       <section class="panel">
@@ -173,8 +194,15 @@ function download() {
         <StatsTable :result="result" :palette="palette" />
       </section>
 
+      <QualityCheck
+        v-model:active="qualityActive"
+        :result="result"
+        :palette="palette"
+        @highlight="qualityHighlights = $event"
+      />
+
       <section class="panel">
-        <h2>5. 导出</h2>
+        <h2>6. 导出</h2>
         <p class="hint">行号、列号、色板序号均从 1 开始，以单个制表符分隔，记录以 LF 分隔，文件末尾不换行。</p>
         <button type="button" data-testid="download-button" @click="download">下载映射文件</button>
         <textarea

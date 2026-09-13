@@ -8,3 +8,6 @@ export const MAX_CELL_SIZE = 48;
 /** 空格（全透明像素）的棋盘格填充色 */
 export const BLANK_LIGHT = '#ffffff';
 export const BLANK_DARK = '#e0e0e0';
+
+/** 质量核查超限格的描边色 */
+export const QUALITY_STROKE = '#e8312a';

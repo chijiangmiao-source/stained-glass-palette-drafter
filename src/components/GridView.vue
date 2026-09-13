@@ -10,9 +10,18 @@ import {
   GRID_LABEL_W,
   MAX_CELL_SIZE,
   MIN_CELL_SIZE,
+  QUALITY_STROKE,
 } from '../core/layout';
 
-const props = defineProps<{ result: GridResult; palette: PaletteColor[] }>();
+const props = withDefaults(
+  defineProps<{
+    result: GridResult;
+    palette: PaletteColor[];
+    /** 质量核查开启时需要描边高亮的格下标集合（行优先）；未开启或为空时不描边 */
+    highlighted?: ReadonlySet<number> | null;
+  }>(),
+  { highlighted: null },
+);
 const emit = defineEmits<{
   /** 校色操作：paletteIndex 为 null 表示恢复该格的自动计算结果 */
   (e: 'override', payload: { row: number; col: number; paletteIndex: number | null }): void;
@@ -156,6 +165,23 @@ function draw() {
     ctx.stroke();
   }
 
+  // 质量核查超限格描边：在底色与网格线之上醒目标记，小格时略收描边宽度
+  if (props.highlighted && props.highlighted.size > 0) {
+    ctx.strokeStyle = QUALITY_STROKE;
+    ctx.lineWidth = s >= 8 ? 2 : 1;
+    ctx.beginPath();
+    for (const cell of cells) {
+      if (cell.blank) continue;
+      const idx = (cell.row - 1) * width + (cell.col - 1);
+      if (!props.highlighted.has(idx)) continue;
+      const x = GRID_LABEL_W + (cell.col - 1) * s;
+      const y = GRID_LABEL_H + (cell.row - 1) * s;
+      const inset = ctx.lineWidth / 2;
+      ctx.rect(x + inset, y + inset, s - ctx.lineWidth, s - ctx.lineWidth);
+    }
+    ctx.stroke();
+  }
+
   // 行列编号（从 1 开始）
   ctx.fillStyle = '#333333';
   ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace';
@@ -293,7 +319,9 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown);
 });
 
-watch([() => props.result, () => props.palette, cellSize, hover, selected], draw, { deep: true });
+watch([() => props.result, () => props.palette, () => props.highlighted, cellSize, hover, selected], draw, {
+  deep: true,
+});
 
 // 提示内容变化后重新测量尺寸，保证钳位用的大小是最新的
 watch(

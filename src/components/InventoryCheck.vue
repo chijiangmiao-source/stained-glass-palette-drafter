@@ -89,7 +89,7 @@ function clear() {
 
 <template>
   <section class="panel inventory-check">
-    <h2>6. 备料核验</h2>
+    <h2>7. 备料核验</h2>
     <p class="hint">
       以当前最终色片数为需求快照，逐色录入库房可用库存（非负整数），生成核验单判断能否直接备料；核验不改变网格与采购文本。
     </p>
