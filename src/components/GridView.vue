@@ -22,6 +22,9 @@ const cellSize = ref(DEFAULT_CELL_SIZE);
 const canvasRef = ref<HTMLCanvasElement | null>(null);
 const hover = ref<{ row: number; col: number } | null>(null);
 const tooltipPos = ref({ x: 0, y: 0 });
+const tooltipRef = ref<HTMLElement | null>(null);
+/** 悬停提示的实际尺寸，用于把提示钳制在视口内 */
+const tooltipSize = ref({ w: 0, h: 0 });
 
 /** 当前打开校色弹层的格子；点击透明格时也记录，用于给出拒绝提示 */
 const selected = ref<{ row: number; col: number; x: number; y: number } | null>(null);
@@ -113,19 +116,26 @@ function draw() {
     }
   }
 
-  // 人工校色标记：格角小圆点
+  // 人工校色标记：格角小圆点；小格时收缩并钳位，确保整体落在本格内
   for (const cell of cells) {
     if (!isManual(cell)) continue;
     const x = GRID_LABEL_W + (cell.col - 1) * s;
     const y = GRID_LABEL_H + (cell.row - 1) * s;
-    const r = Math.max(1.5, Math.min(3, s / 6));
+    const want = Math.max(1.5, Math.min(3, s / 6)); // 常规半径，保持原有观感
+    const r = Math.max(0.5, Math.min(want, (s - 2) / 2)); // 小格时收缩到格内容得下
+    const stroked = r >= 1.5; // 太小的圆点省略白色描边，避免描边吞掉黑芯
+    const outer = stroked ? r + 0.5 : r;
+    const cx = Math.min(Math.max(x + s - r - 1.5, x + outer), x + s - outer);
+    const cy = Math.min(Math.max(y + r + 1.5, y + outer), y + s - outer);
     ctx.beginPath();
-    ctx.arc(x + s - r - 1.5, y + r + 1.5, r, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fillStyle = '#000000';
     ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#ffffff';
-    ctx.stroke();
+    if (stroked) {
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+    }
   }
 
   // 网格线（格子过小时省略，保持画面干净）
@@ -253,6 +263,15 @@ function restoreAuto() {
   closePicker();
 }
 
+/** 悬停提示定位：跟随光标，但完整提示始终留在视口内 */
+const tooltipStyle = computed(() => {
+  const margin = 8;
+  const { w, h } = tooltipSize.value;
+  const x = Math.min(tooltipPos.value.x + 12, window.innerWidth - w - margin);
+  const y = Math.min(tooltipPos.value.y + 12, window.innerHeight - h - margin);
+  return { left: `${Math.max(margin, x)}px`, top: `${Math.max(margin, y)}px` };
+});
+
 /** 弹层定位：避免超出视口右边/下边 */
 const pickerStyle = computed(() => {
   if (!selected.value) return {};
@@ -275,6 +294,16 @@ onBeforeUnmount(() => {
 });
 
 watch([() => props.result, () => props.palette, cellSize, hover, selected], draw, { deep: true });
+
+// 提示内容变化后重新测量尺寸，保证钳位用的大小是最新的
+watch(
+  hoverCell,
+  () => {
+    const el = tooltipRef.value;
+    tooltipSize.value = el ? { w: el.offsetWidth, h: el.offsetHeight } : { w: 0, h: 0 };
+  },
+  { flush: 'post' },
+);
 </script>
 
 <template>
@@ -304,11 +333,13 @@ watch([() => props.result, () => props.palette, cellSize, hover, selected], draw
         @click="onClick"
       ></canvas>
     </div>
+    <!-- 校色弹层打开时隐藏悬停提示，避免盖住选色面板 -->
     <div
-      v-if="hoverCell"
+      v-if="hoverCell && !selected"
+      ref="tooltipRef"
       class="cell-tooltip"
       data-testid="cell-tooltip"
-      :style="{ left: `${tooltipPos.x + 12}px`, top: `${tooltipPos.y + 12}px` }"
+      :style="tooltipStyle"
     >
       <div>行 {{ hoverCell.row }}，列 {{ hoverCell.col }}</div>
       <template v-if="hoverCell.blank">
@@ -463,7 +494,7 @@ canvas {
 
 .color-picker {
   position: fixed;
-  z-index: 21;
+  z-index: 40;
   background: #fff;
   border: 1px solid #c9ced6;
   border-radius: 8px;
