@@ -8,6 +8,7 @@ import { buildExportText } from './core/export';
 import type { GridResult, PaletteColor } from './core/types';
 import GridView from './components/GridView.vue';
 import StatsTable from './components/StatsTable.vue';
+import InventoryCheck from './components/InventoryCheck.vue';
 
 const paletteInput = ref('');
 const palette = ref<PaletteColor[] | null>(null);
@@ -26,6 +27,9 @@ const result = computed<GridResult | null>(() =>
 
 /** 导出内容与网格、统计同源，保证逐格一致 */
 const exportText = computed(() => (result.value ? buildExportText(result.value) : ''));
+
+/** 当前最终色片数（含人工校色），作为备料核验的需求来源；无映射结果时为 null */
+const finalCounts = computed(() => result.value?.counts ?? null);
 
 /** 清空人工指定：上传新图片或（重新）应用色板时调用 */
 function clearOverrides() {
@@ -186,5 +190,9 @@ function download() {
     <p v-else-if="!error" class="hint" data-testid="idle-hint">
       上传合法图片并应用合法色板后，此处将显示编号网格、用量统计与导出内容。
     </p>
+
+    <!-- 独立的备料核验面板：App 只传入当前色板与最终计数，核验单状态由组件自管；
+         始终挂载，使旧核验单在换图或重应用色板后仍保留为已过期快照 -->
+    <InventoryCheck :palette="palette" :counts="finalCounts" />
   </main>
 </template>
